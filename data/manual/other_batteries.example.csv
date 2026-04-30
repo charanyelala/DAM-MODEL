@@ -1,0 +1,4 @@
+asset_id,company,country,region,chemistry,cooling,power_mw,capacity_mwh,duration_h,commissioning_year,cycle_life_to_80pct,calendar_fade_pct_per_year,replacement_eur_per_mwh,notes
+ppc_amyntaio,PPC,Greece,Western Macedonia,LFP,liquid,50,200,4,2026,6000,1.8,120000,publicly described as liquid-cooled LFP
+metlen_ppc_portfolio,METLEN/PPC,Romania-Bulgaria-Italy,regional,LFP,liquid,1500,3000,2,2026,6000,1.8,120000,publicly described as two-hour liquid-cooled LFP
+metlen_karatzis_thessaly,METLEN/Karatzis,Greece,Thessaly,LFP_assumed,liquid_assumed,330,790,2.39,2026,6000,1.8,120000,chemistry not confirmed in public announcement; LFP assumption based on similar regional projects

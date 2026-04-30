@@ -1,0 +1,4 @@
+scenario,cycle_life_to_80pct,calendar_fade_pct_per_year,thermal_derating_start_c,replacement_eur_per_mwh
+conservative,4000,2.5,35,140000
+base,6000,1.8,40,120000
+optimistic,8000,1.2,45,100000
