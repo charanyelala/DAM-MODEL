@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 INTERVALS_PER_DAY = 96
@@ -9,7 +10,10 @@ def normalize_date(value: str | datetime | None = None) -> str:
     if value is None:
         return datetime.now(timezone.utc).date().isoformat()
     if isinstance(value, str):
-        return value[:10]
+        raw = value.strip()
+        for candidate in _timestamp_candidates(raw, raw[:4] if raw[:4].isdigit() else None):
+            return candidate.date().isoformat()
+        return raw[:10]
     return value.date().isoformat()
 
 
@@ -43,7 +47,11 @@ def intervals_for_date(date_string: str) -> list[dict]:
 def parse_timestamp(value: str | None, date_string: str, mtu: int) -> str:
     if value:
         raw = value.strip()
-        for candidate in _timestamp_candidates(raw):
+        candidates = _timestamp_candidates(raw, date_string)
+        for candidate in candidates:
+            if candidate.date().isoformat() == date_string:
+                return candidate.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        for candidate in candidates:
             try:
                 return candidate.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
             except ValueError:
@@ -51,7 +59,7 @@ def parse_timestamp(value: str | None, date_string: str, mtu: int) -> str:
     return intervals_for_date(date_string)[mtu % INTERVALS_PER_DAY]["timestamp"]
 
 
-def _timestamp_candidates(raw: str) -> list[datetime]:
+def _timestamp_candidates(raw: str, date_string: str | None = None) -> list[datetime]:
     first = raw.split(" - ", 1)[0].strip()
     iso = first.replace(" ", "T")
     if iso.endswith("Z"):
@@ -60,14 +68,42 @@ def _timestamp_candidates(raw: str) -> list[datetime]:
         iso = iso + "+00:00"
 
     candidates = []
+    seen = set()
+
+    def add(candidate: datetime) -> None:
+        if candidate.tzinfo is None:
+            candidate = candidate.replace(tzinfo=timezone.utc)
+        key = candidate.isoformat()
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
     try:
-        candidates.append(datetime.fromisoformat(iso))
+        add(datetime.fromisoformat(iso))
     except ValueError:
         pass
 
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+    for fmt in (
+        "%d/%m/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%m/%d/%Y %H:%M",
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+    ):
         try:
-            candidates.append(datetime.strptime(first, fmt).replace(tzinfo=timezone.utc))
+            add(datetime.strptime(first, fmt).replace(tzinfo=timezone.utc))
         except ValueError:
             pass
+
+    year = date_string[:4] if date_string and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_string) else None
+    match = re.fullmatch(r"(?P<date>\d{1,2}/\d{1,2})(?:[ T](?P<time>\d{1,2}:\d{2}(?::\d{2})?))?", first)
+    if year and match:
+        date_part = f"{match.group('date')}/{year}"
+        inferred = f"{date_part} {match.group('time')}" if match.group("time") else date_part
+        for fmt in ("%d/%m/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%m/%d/%Y %H:%M", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                add(datetime.strptime(inferred, fmt).replace(tzinfo=timezone.utc))
+            except ValueError:
+                pass
     return candidates

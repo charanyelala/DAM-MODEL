@@ -3,6 +3,7 @@
 const uploadStates = {};
 const fetchStates  = {};
 const datasetModes = {};
+const uploadModes  = {};
 
 const apiConnections = {
   entso: {
@@ -25,6 +26,14 @@ function getDatasetMode(key) {
 function setDatasetMode(key, mode) {
   datasetModes[key] = mode;
   localStorage.setItem("dm_" + key, mode);
+}
+function getUploadMode(key) {
+  if (uploadModes[key] !== undefined) return uploadModes[key];
+  return localStorage.getItem("um_" + key) || "replace";
+}
+function setUploadMode(key, mode) {
+  uploadModes[key] = mode;
+  localStorage.setItem("um_" + key, mode);
 }
 
 const UPLOAD_DATASETS = [
@@ -834,8 +843,8 @@ function renderQuality(view) {
           <div class="field">
             <label for="upload-mode">Mode</label>
             <select id="upload-mode" name="mode">
-              <option value="append">Append rows</option>
               <option value="replace">Replace file</option>
+              <option value="append">Append rows</option>
             </select>
           </div>
           <div class="field">
@@ -1160,6 +1169,7 @@ function nextDay(dateStr) {
 
 function renderDatasetCard(ds, tomorrow) {
   const mode    = getDatasetMode(ds.key);
+  const uploadMode = getUploadMode(ds.key);
   const uSt     = uploadStates[ds.key] || { status: "idle" };
   const fSt     = fetchStates[ds.key]  || { status: "idle" };
   const hasApi  = ds.apiSource !== null;
@@ -1226,6 +1236,13 @@ function renderDatasetCard(ds, tomorrow) {
       <div class="dataset-format">
         <div class="format-label">CSV columns</div>
         <code class="format-code">${escapeHtml(ds.format)}\n\n${escapeHtml(ds.example)}</code>
+      </div>
+      <div class="dataset-format">
+        <div class="format-label">Upload mode</div>
+        <div class="mode-toggle">
+          <button class="mode-tab ${uploadMode === "replace" ? "active" : ""}" data-upload-mode="replace" data-key="${escapeHtml(ds.key)}">Replace</button>
+          <button class="mode-tab ${uploadMode === "append" ? "active" : ""}" data-upload-mode="append" data-key="${escapeHtml(ds.key)}">Append</button>
+        </div>
       </div>
       <div class="drop-zone ${uSt.status}" data-dataset="${escapeHtml(ds.key)}" role="button" tabindex="0" aria-label="Upload ${escapeHtml(ds.label)} CSV">
         <input type="file" accept=".csv,text/csv" class="drop-input" style="display:none" />
@@ -1326,7 +1343,11 @@ function bindUploadControls() {
     if (btn.dataset.bound === "true") return;
     btn.dataset.bound = "true";
     btn.addEventListener("click", () => {
-      setDatasetMode(btn.dataset.key, btn.dataset.mode);
+      if (btn.dataset.uploadMode) {
+        setUploadMode(btn.dataset.key, btn.dataset.uploadMode);
+      } else {
+        setDatasetMode(btn.dataset.key, btn.dataset.mode);
+      }
       render();
     });
   });
@@ -1355,29 +1376,34 @@ function bindUploadControls() {
       e.preventDefault();
       zone.classList.remove("dragover");
       const file = e.dataTransfer?.files?.[0];
-      if (file) uploadDataset(key, file);
+      if (file) uploadDataset(key, file, getUploadMode(key));
     });
     input.addEventListener("change", () => {
       const file = input.files?.[0];
-      if (file) uploadDataset(key, file);
+      if (file) uploadDataset(key, file, getUploadMode(key));
       input.value = "";
     });
   });
 }
 
-async function uploadDataset(key, file) {
+async function postManualUpload(key, file, mode = "replace") {
+  const formData = new FormData();
+  formData.append("dataset", key);
+  formData.append("mode", mode);
+  formData.append("file", file);
+  const result = await fetch("/api/manual/upload", { method: "POST", body: formData }).then(async (r) => {
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || "Upload failed");
+    return body;
+  });
+  return result;
+}
+
+async function uploadDataset(key, file, mode = "replace") {
   uploadStates[key] = { status: "uploading", message: "Uploading…" };
   if (state.activeTab === "upload") render();
   try {
-    const formData = new FormData();
-    formData.append("dataset", key);
-    formData.append("mode", "replace");
-    formData.append("file", file);
-    const result = await fetch("/api/manual/upload", { method: "POST", body: formData }).then(async (r) => {
-      const body = await r.json();
-      if (!r.ok) throw new Error(body.error || "Upload failed");
-      return body;
-    });
+    const result = await postManualUpload(key, file, mode);
     uploadStates[key] = { status: "success", message: `${result.rows} rows loaded` };
   } catch (err) {
     uploadStates[key] = { status: "error", message: err.message };
@@ -1418,19 +1444,20 @@ function bindViewControls() {
     uploadForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const file = document.getElementById("upload-file").files[0];
+      const dataset = document.getElementById("upload-dataset")?.value || "";
+      const mode = document.getElementById("upload-mode")?.value || "replace";
       if (!file) return;
-      const formData = new FormData(uploadForm);
+      if (!dataset) return;
       state.uploadMessage = "Uploading CSV…";
+      uploadStates[dataset] = { status: "uploading", message: "Uploading…" };
       render();
       try {
-        const result = await fetch("/api/manual/upload", { method: "POST", body: formData }).then(async (response) => {
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error || "Upload failed.");
-          return body;
-        });
+        const result = await postManualUpload(dataset, file, mode);
+        uploadStates[dataset] = { status: "success", message: `${result.rows} rows loaded` };
         state.uploadMessage = `Uploaded ${result.rows} rows into ${result.dataset}. Click Run Model for ${state.date}.`;
         await refreshAll({ runPipeline: false, quiet: true });
       } catch (error) {
+        uploadStates[dataset] = { status: "error", message: error.message };
         state.uploadMessage = `Upload failed: ${error.message}`;
         render();
       }

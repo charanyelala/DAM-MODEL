@@ -14,6 +14,7 @@ from py_backend.models.forecast_errors import predict_forecast_errors
 from py_backend.models.price_forecast import forecast_prices
 from py_backend.optimizer.battery import optimize_battery
 from py_backend.groq_summary import explain_run
+from py_backend.utils.time import parse_timestamp
 
 
 def test_pipeline_rows():
@@ -92,6 +93,12 @@ def test_groq_local_fallback_without_key():
             os.environ["GROQ_MODEL"] = previous_model
 
 
+def test_ambiguous_uploaded_timestamps_prefer_target_date():
+    assert parse_timestamp("01/05/2026 00:15:00", "2026-05-01", 0) == "2026-05-01T00:15:00Z"
+    assert parse_timestamp("01/05/2026 00:15:00", "2026-01-05", 0) == "2026-01-05T00:15:00Z"
+    assert parse_timestamp("05/01 00:30", "2026-05-01", 0) == "2026-05-01T00:30:00Z"
+
+
 def main():
     tests = [
         test_pipeline_rows,
@@ -99,6 +106,7 @@ def main():
         test_optimizer_respects_low_initial_soc,
         test_anomaly_detection,
         test_groq_local_fallback_without_key,
+        test_ambiguous_uploaded_timestamps_prefer_target_date,
     ]
     for test in tests:
         test()
